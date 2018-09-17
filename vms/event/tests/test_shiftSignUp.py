@@ -1,334 +1,666 @@
-from django.test import TestCase
+# Django
 from django.contrib.staticfiles.testing import LiveServerTestCase
 
-from django.contrib.auth.models import User
-from volunteer.models import Volunteer
-from event.models import Event
-from job.models import Job
-from shift.models import Shift, VolunteerShift
-
+# third party
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver.firefox.options import Options
 
-from organization.models import Organization #hack to pass travis,Bug in Code
+# local Django
+from job.models import Job
+from pom.pages.authenticationPage import AuthenticationPage
+from pom.pages.eventSignUpPage import EventSignUpPage
+from shift.utils import (create_volunteer, create_organization_with_details,
+                         create_second_country, create_second_state,
+                         create_second_city, get_country_by_name,
+                         get_state_by_name, get_city_by_name,
+                         register_event_utility, register_job_utility,
+                         register_shift_utility, create_shift_with_details,
+                         create_volunteer_with_details,
+                         register_volunteer_for_shift_utility)
 
 
 class ShiftSignUp(LiveServerTestCase):
-    '''
-    '''
+    """
+    Contains tests for for event app from volunteer view:
+    -
+    -
+    -
+    -
+    """
+
+    @classmethod
+    def setUpClass(cls):
+
+        """Method to initiate class level objects.
+
+        This method initiates Firefox WebDriver, WebDriverWait and
+        the corresponding POM objects for this Test Class
+        """
+        firefox_options = Options()
+        firefox_options.add_argument('-headless')
+        cls.driver = webdriver.Firefox(firefox_options=firefox_options)
+        cls.driver.implicitly_wait(5)
+        cls.driver.maximize_window()
+        cls.sign_up_page = EventSignUpPage(cls.driver)
+        cls.authentication_page = AuthenticationPage(cls.driver)
+        super(ShiftSignUp, cls).setUpClass()
+
     def setUp(self):
-        volunteer_user = User.objects.create_user(
-                username = 'volunteer',
-                password = 'volunteer')
-
-        Volunteer.objects.create(
-                user = volunteer_user,
-                address = 'address',
-                city = 'city',
-                state = 'state',
-                country = 'country',
-                phone_number = '9999999999',
-                email = 'volunteer@volunteer.com',
-                unlisted_organization = 'organization')
-
-        # create an org prior to registration. Bug in Code
-        # added to pass CI
-        Organization.objects.create(
-                name = 'DummyOrg')
-
-        self.homepage = '/'
-        self.authentication_page = '/authentication/login/'
-        self.driver = webdriver.Firefox()
-        self.driver.implicitly_wait(5)
-        self.driver.maximize_window()
-        super(ShiftSignUp, self).setUp()
+        """
+        Method consists of statements to be executed before
+        start of each test.
+        """
+        create_volunteer()
+        self.login_volunteer()
 
     def tearDown(self):
-        self.driver.quit()
-        super(ShiftSignUp, self).tearDown()
+        """
+        Method consists of statements to be executed at
+        end of each test.
+        """
+        self.authentication_page.logout()
 
-    def login(self):
-        self.driver.get(self.live_server_url + self.authentication_page)
-        self.driver.find_element_by_id('id_login').send_keys('volunteer')
-        self.driver.find_element_by_id('id_password').send_keys('volunteer')
-        self.driver.find_element_by_xpath('//form[1]').submit()
+    @classmethod
+    def tearDownClass(cls):
+        """
+        Class method to quit the Firefox WebDriver session after
+        execution of all tests in class.
+        """
+        cls.driver.quit()
+        super(ShiftSignUp, cls).tearDownClass()
 
-        self.assertEqual(self.driver.current_url,
-                self.live_server_url + self.homepage)
-
-    def register_event_utility(self):
-        Event.objects.create(
-                name = 'event',
-                start_date = '2016-05-10',
-                end_date = '2018-06-16')
-
-    def register_job_utility(self):
-        Job.objects.create(
-                name = 'job',
-                start_date = '2016-05-10',
-                end_date = '2017-06-15',
-                event = Event.objects.get(name = 'event'))
-
-    def register_shift_utility(self):
-        Shift.objects.create(
-                date = '2017-06-15',
-                start_time = '09:00',
-                end_time = '15:00',
-                max_volunteers ='6',
-                job = Job.objects.get(name = 'job'))
+    def login_volunteer(self):
+        """
+        Utility function to login as volunteer with correct credentials.
+        """
+        self.authentication_page.server_url = self.live_server_url
+        self.authentication_page.login({
+            'username': 'volunteer',
+            'password': 'volunteer'
+        })
 
     def test_events_page_with_no_events(self):
-        self.login()
-
-        # open Shift Sign Up
-        self.driver.find_element_by_link_text('Shift Sign Up').click()
-
-        self.assertEqual(self.driver.find_element_by_class_name('alert-info').text,
-               'There are no events.')
-
+        """
+        Test event view with no registered events.
+        """
+        sign_up_page = self.sign_up_page
+        sign_up_page.navigate_to_sign_up()
+        self.assertEqual(
+            sign_up_page.get_info_box().text,
+            sign_up_page.no_event_message
+        )
 
     def test_signup_shifts_with_registered_shifts(self):
-        # login
-        self.login()
+        """
+        Test volunteer signing for a shift which is registered.
+        """
+        registered_event = register_event_utility()
+        registered_job = register_job_utility()
+        registered_shift = register_shift_utility()
 
-        self.register_event_utility()
-        self.register_job_utility()
-        self.register_shift_utility()
+        sign_up_page = self.sign_up_page
 
-        # open Shift Sign Up
-        self.driver.find_element_by_link_text('Shift Sign Up').click()
+        # Open Shift Sign Up
+        sign_up_page.navigate_to_sign_up()
 
-        # on event page
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[4]').text, 'View Jobs')
-        self.driver.find_element_by_xpath(
-                '//table//tbody//tr[1]//td[4]//a').click()
+        # On event page
+        sign_up_page.click_to_view_jobs()
 
-        # on jobs page
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[4]').text, 'View Shifts')
-        self.driver.find_element_by_xpath(
-                '//table//tbody//tr[1]//td[4]//a').click()
+        # On jobs page
+        sign_up_page.click_to_view_shifts()
 
-        # on shifts page
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[4]').text, 'Sign Up')
-        self.driver.find_element_by_xpath(
-                '//table//tbody//tr[1]//td[4]//a').click()
+        # On shifts page
+        sign_up_page.click_to_sign_up()
 
-        # confirm shift assignment
-        self.driver.find_element_by_xpath('//form[1]').submit()
+        # Confirm shift assignment
+        sign_up_page.submit_form()
         with self.assertRaises(NoSuchElementException):
-            self.driver.find_element_by_class_name('alert-danger')
+            sign_up_page.get_danger_box()
 
         # check shift signed up
-        self.assertEqual(self.driver.find_element_by_xpath(
-            'html/body/div[2]/h3').text,
-            'Upcoming Shifts')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[1]').text,
-            'job')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[2]').text,
-            'June 15, 2017')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[3]').text,
-            '9 a.m.')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[4]').text,
-            '3 p.m.')
+        self.assertEqual(
+            sign_up_page.get_signed_up_shift_text(),
+            'Upcoming Shifts'
+        )
+        self.assertEqual(sign_up_page.get_shift_job(), 'job')
+        self.assertEqual(sign_up_page.get_shift_date(), 'June 15, 2050')
+        self.assertEqual(sign_up_page.get_shift_start_time(), '9 a.m.')
+        self.assertEqual(sign_up_page.get_shift_end_time(), '3 p.m.')
 
     def test_signup_for_same_shift_again(self):
-        # login
-        self.login()
+        """
+        Test volunteer signing up for the same shift again.
+        """
+        registered_event = register_event_utility()
+        registered_job = register_job_utility()
+        registered_shift = register_shift_utility()
 
-        self.register_event_utility()
-        self.register_job_utility()
-        self.register_shift_utility()
+        sign_up_page = self.sign_up_page
+        # Open Shift Sign Up
+        sign_up_page.navigate_to_sign_up()
 
-        # open Shift Sign Up
-        self.driver.find_element_by_link_text('Shift Sign Up').click()
-
-        # events shown in table
+        # Events shown in table
         with self.assertRaises(NoSuchElementException):
-            self.driver.find_element_by_class_name('alert-info')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[4]').text,
-            'View Jobs')
-        self.driver.find_element_by_xpath(
-                '//table//tbody//tr[1]//td[4]//a').click()
+            sign_up_page.get_info_box()
+        sign_up_page.click_to_view_jobs()
 
-        # on jobs page
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[4]').text,
-            'View Shifts')
-        self.driver.find_element_by_xpath(
-                '//table//tbody//tr[1]//td[4]//a').click()
+        # On jobs page
+        sign_up_page.click_to_view_shifts()
 
-        # on shifts page, Sign up this shift !
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[4]').text,
-            'Sign Up')
-        self.driver.find_element_by_xpath(
-                '//table//tbody//tr[1]//td[4]//a').click()
+        # On shifts page, Sign up this shift !
+        sign_up_page.click_to_sign_up()
 
-        # confirm on shift sign up
-        self.driver.find_element_by_xpath('//form[1]').submit()
+        # Confirm on shift sign up
+        sign_up_page.submit_form()
         with self.assertRaises(NoSuchElementException):
-            self.driver.find_element_by_class_name('alert-danger')
+            sign_up_page.get_danger_box()
 
-        # sign up same shift again
-        # open Shift Sign Up
-        self.driver.find_element_by_link_text('Shift Sign Up').click()
+        # Sign up same shift again
+        # Open Shift Sign Up
+        sign_up_page.navigate_to_sign_up()
 
-        # events page
-        self.assertEqual(self.driver.find_element_by_class_name('alert-info').text,
-               'There are no events.')
+        # Events page
+        self.assertEqual(
+            sign_up_page.get_info_box().text,
+            sign_up_page.no_event_message
+        )
+
         with self.assertRaises(NoSuchElementException):
-            self.driver.find_element_by_tag_name('table')
-            self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[4]').text, 'View Jobs')
-
+            sign_up_page.find_table_tag()
 
     def test_empty_events(self):
-        self.login()
+        """
+        Test no events present in the event view.
+        """
+        registered_event = register_event_utility()
+        sign_up_page = self.sign_up_page
+        # Open Shift Sign Up
+        sign_up_page.navigate_to_sign_up()
 
-        self.register_event_utility()
+        # On event page
+        self.assertEqual(
+            sign_up_page.get_info_box().text,
+            sign_up_page.no_event_message
+        )
 
-        # open Shift Sign Up
-        self.driver.find_element_by_link_text('Shift Sign Up').click()
-
-        # on event page
-        self.assertEqual(self.driver.find_element_by_class_name('alert-info').text,
-               'There are no events.')
         with self.assertRaises(NoSuchElementException):
-            self.driver.find_element_by_tag_name('table')
-            self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[4]').text, 'View Jobs')
+            sign_up_page.find_table_tag()
+            sign_up_page.click_to_view_jobs()
 
-        self.register_job_utility()
+        registered_job = register_job_utility()
 
-        self.assertEqual(self.driver.find_element_by_class_name('alert-info').text,
-               'There are no events.')
+        self.assertEqual(
+            sign_up_page.get_info_box().text,
+            sign_up_page.no_event_message
+        )
+
         with self.assertRaises(NoSuchElementException):
-            self.driver.find_element_by_tag_name('table')
-            self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[4]').text, 'View Jobs')
+            sign_up_page.find_table_tag()
 
     def test_shift_sign_up_with_outdated_shifts(self):
-        self.login()
-
-        self.register_event_utility()
-        self.register_job_utility()
+        """
+        Test signing up for the shifts whose date have passed.
+        """
+        registered_event = register_event_utility()
+        registered_job = register_job_utility()
+        sign_up_page = self.sign_up_page
 
         # create outdated shift
-        Shift.objects.create(
-                date = '2016-05-11',
-                start_time = '09:00',
-                end_time = '15:00',
-                max_volunteers ='6',
-                job = Job.objects.get(name = 'job'))
+        shift_1 = {
+            'date': "2016-05-11",
+            'start_time': "9:00",
+            'end_time': "15:00",
+            'max_volunteers': 6,
+            'job': Job.objects.get(name='job'),
+            'address': 'shift-address',
+            'venue': 'shift-venue'
+        }
+        created_shift = create_shift_with_details(shift_1)
 
         # open Shift Sign Up
-        self.driver.find_element_by_link_text('Shift Sign Up').click()
+        sign_up_page.navigate_to_sign_up()
 
         # on event page
-        self.assertEqual(self.driver.find_element_by_xpath('//table//tbody//tr[1]//td[4]').text, 'View Jobs')
-        self.driver.find_element_by_xpath('//table//tbody//tr[1]//td[4]//a').click()
+        sign_up_page.click_to_view_jobs()
 
         # on jobs page
-        self.assertEqual(self.driver.find_element_by_xpath('//table//tbody//tr[1]//td[4]').text, 'View Shifts')
-        self.driver.find_element_by_xpath('//table//tbody//tr[1]//td[4]//a').click()
-
-        self.assertEqual(self.driver.find_element_by_class_name('alert-info').text,'There are currently no shifts for the job job.')
+        sign_up_page.click_to_view_shifts()
+        self.assertEqual(
+            sign_up_page.get_info_box().text,
+            sign_up_page.get_message_shift_not_available_for_job('job')
+        )
 
     def test_shift_sign_up_with_no_slots(self):
+        """
+        Test signing up for a shift for which volunteer needed is zero.
+        """
+        registered_event = register_event_utility()
+        registered_job = register_job_utility()
 
-        self.register_event_utility()
-        self.register_job_utility()
+        sign_up_page = self.sign_up_page
 
         # create shift with no slot
-        shift_2 = Shift.objects.create(
-                date = '2016-05-11',
-                start_time = '09:00',
-                end_time = '15:00',
-                max_volunteers ='1',
-                job = Job.objects.get(name = 'job'))
+        shift_2 = {
+            'date': "2016-05-11",
+            'start_time': "9:00",
+            'end_time': "15:00",
+            'max_volunteers': 1,
+            'job': Job.objects.get(name='job'),
+            'address': 'shift-address',
+            'venue': 'shift-venue'
+        }
+        s2 = create_shift_with_details(shift_2)
 
         # Create another volunteer
-        volunteer_user_2 = User.objects.create_user(
-                username = 'volunteer-2',
-                password = 'volunteer')
+        org_name = 'volunteer-organization'
+        org_obj = create_organization_with_details(org_name)
 
-        volunteer_2 = Volunteer.objects.create(
-                user = volunteer_user_2,
-                address = 'address',
-                city = 'city',
-                state = 'state',
-                country = 'country',
-                phone_number = '9999999999',
-                email = 'volunteer2@volunteer.com',
-                unlisted_organization = 'organization')
+        second_country = create_second_country()
+        second_state = create_second_state()
+        second_city = create_second_city()
+        volunteer_2 = {
+            'username': 'volunteer-2',
+            'first_name': "Sam",
+            'last_name': "Turtle",
+            'address': "Mario Land",
+            'city': second_city,
+            'state': second_state,
+            'country': second_country,
+            'phone_number': "2374983247",
+            'email': "volunteer2@volunteer.com"
+        }
+        v2 = create_volunteer_with_details(volunteer_2, org_obj)
 
         # Assign shift to the volunteer
-        VolunteerShift.objects.create(
-                shift = shift_2,
-                volunteer = volunteer_2)
+        registered_vol_shift = register_volunteer_for_shift_utility(s2, v2)
 
-        # Login as volunteer 1 and open Shift Sign Up
-        self.login()
-        self.driver.find_element_by_link_text('Shift Sign Up').click()
+        # open Shift Sign Up
+        sign_up_page.navigate_to_sign_up()
 
         # on event page
-        self.assertEqual(self.driver.find_element_by_class_name('alert-info').text,'There are no events.')
+        self.assertEqual(
+            sign_up_page.get_info_box().text,
+            sign_up_page.no_event_message
+        )
 
-    def test_search_event(self):
+    def test_search_event_name_present(self):
+        """
+        tests for search results on the basis of event name
+        """
+        register_event_utility()
+        register_job_utility()
+        register_shift_utility()
 
-        self.register_event_utility()
-        self.register_job_utility()
-        self.register_shift_utility()
+        sign_up_page = self.sign_up_page
+        sign_up_page.live_server_url = self.live_server_url
 
-        # Login as volunteer 1 and open Shift Sign Up
-        self.login()
-        self.driver.find_element_by_link_text('Shift Sign Up').click()
+        # Enter name of the event
+        sign_up_page.go_to_sign_up_page()
+        parameters = {
+            'name': 'event',
+            'date_from': '',
+            'date_to': '',
+            'city': '',
+            'state': '',
+            'country': ''
+        }
+        sign_up_page.fill_search_form(parameters)
+        # Verify that the event shows up
+        self.assertEqual(sign_up_page.get_event_name(), 'event')
 
-        # enter date range in which an event starts
-        self.driver.find_element_by_id('from').send_keys('05/08/2016')
-        self.driver.find_element_by_id('to').send_keys('08/31/2017')
-        self.driver.find_element_by_xpath('//form[1]').submit()
-        # verify that the event shows up
-        self.assertEqual(self.driver.find_element_by_xpath('//table//tbody//tr[1]//td[1]').text, 'event')
+    def test_search_event_both_date_present(self):
+        """
+        tests for search results on the basis of event start date and end date
+        """
+        register_event_utility()
+        register_job_utility()
+        register_shift_utility()
 
-        # enter date range in which no event starts
-        self.driver.find_element_by_id('from').clear()
-        self.driver.find_element_by_id('to').clear()
-        self.driver.find_element_by_id('from').send_keys('10/08/2016')
-        self.driver.find_element_by_id('to').send_keys('08/31/2017')
-        self.driver.find_element_by_xpath('//form[1]').submit()
-        # verify that no event shows up on event page
-        self.assertEqual(self.driver.find_element_by_class_name('alert-info').text,'There are no events.')
+        sign_up_page = self.sign_up_page
+        sign_up_page.live_server_url = self.live_server_url
 
-        # enter only incorrect starting date
-        self.driver.find_element_by_id('from').clear()
-        self.driver.find_element_by_id('to').clear()
-        self.driver.find_element_by_id('from').send_keys('10/08/2016')
-        # verify that no event shows up on event page
-        self.assertEqual(self.driver.find_element_by_class_name('alert-info').text,'There are no events.')
+        # Enter date range in which an event starts
+        sign_up_page.go_to_sign_up_page()
+        parameters = {
+            'name': '',
+            'date_from': '05/08/2050',
+            'date_to': '05/31/2050',
+            'city': '',
+            'state': '',
+            'country': ''
+        }
+        sign_up_page.fill_search_form(parameters)
+        # Verify that the event shows up
+        self.assertEqual(sign_up_page.get_event_name(), 'event')
 
-        """# enter only correct starting date
-        self.driver.find_element_by_id('from').clear()
-        self.driver.find_element_by_id('from').send_keys('05/10/2016')
-        # verify that the event shows up
-        self.assertEqual(self.driver.find_element_by_xpath('//table//tbody//tr[1]//td[1]').text, 'event')"""
+    def test_search_event_start_date_present(self):
+        """
+        tests for search results on the basis of event start date
+        """
+        register_event_utility()
+        register_job_utility()
+        register_shift_utility()
 
-        # enter only incorrect ending date
-        self.driver.find_element_by_id('from').clear()
-        self.driver.find_element_by_id('to').send_keys('10/08/2015')
-        # verify that no event shows up on event page
-        self.assertEqual(self.driver.find_element_by_class_name('alert-info').text,'There are no events.')
+        sign_up_page = self.sign_up_page
+        sign_up_page.live_server_url = self.live_server_url
+        # Enter only correct starting date
+        sign_up_page.go_to_sign_up_page()
+        parameters = {
+            'name': '',
+            'date_from': '05/08/2050',
+            'date_to': '',
+            'city': '',
+            'state': '',
+            'country': ''
+        }
+        sign_up_page.fill_search_form(parameters)
+        # Verify that the event shows up
+        self.assertEqual(sign_up_page.get_event_name(), 'event')
 
-        """# enter correct ending date
-        self.driver.find_element_by_id('to').clear()
-        self.driver.find_element_by_id('to').send_keys('06/15/2017')
-        # verify that the event shows up
-        self.assertEqual(self.driver.find_element_by_xpath('//table//tbody//tr[1]//td[1]').text, 'event')"""
+    def test_search_event_end_date_present(self):
+        """
+        tests for search results on the basis of event end date
+        """
+        register_event_utility()
+        register_job_utility()
+        register_shift_utility()
+
+        sign_up_page = self.sign_up_page
+        sign_up_page.live_server_url = self.live_server_url
+
+        # Enter correct ending date
+        sign_up_page.go_to_sign_up_page()
+        parameters = {
+            'name': '',
+            'date_from': '',
+            'date_to': '06/15/2050',
+            'city': '',
+            'state': '',
+            'country': ''
+        }
+        sign_up_page.fill_search_form(parameters)
+        # Verify that the event shows up
+        self.assertEqual(sign_up_page.get_event_name(), 'event')
+
+    def test_search_event_city_present(self):
+        """
+        tests for search results on the basis of event city
+        """
+        event = register_event_utility()
+        city_name = 'Roorkee'
+        city = get_city_by_name(city_name)
+        event.city = city
+        event.save()
+        register_job_utility()
+        register_shift_utility()
+
+        sign_up_page = self.sign_up_page
+        sign_up_page.live_server_url = self.live_server_url
+
+        # Enter correct city
+        sign_up_page.go_to_sign_up_page()
+        parameters = parameters = {
+            'name': '',
+            'date_from': '',
+            'date_to': '',
+            'city': 'Roorkee',
+            'state': '',
+            'country': ''
+        }
+        sign_up_page.fill_search_form(parameters)
+        # Verify that the event shows up
+        self.assertEqual(sign_up_page.get_event_name(), 'event')
+
+    def test_search_event_state_present(self):
+        """
+        tests for search results on the basis of event state
+        """
+        event = register_event_utility()
+        state_name = 'Uttarakhand'
+        state = get_state_by_name(state_name)
+        event.state = state
+        event.save()
+        register_job_utility()
+        register_shift_utility()
+
+        sign_up_page = self.sign_up_page
+        sign_up_page.live_server_url = self.live_server_url
+
+        # Enter correct state
+        sign_up_page.go_to_sign_up_page()
+        parameters = parameters = {
+            'name': '',
+            'date_from': '',
+            'date_to': '',
+            'city': '',
+            'state': 'Uttarakhand',
+            'country': ''
+        }
+        sign_up_page.fill_search_form(parameters)
+        # Verify that the event shows up
+        self.assertEqual(sign_up_page.get_event_name(), 'event')
+
+    def test_search_event_country_present(self):
+        """
+        tests for search results on the basis of event country
+        """
+        event = register_event_utility()
+        country_name = 'India'
+        country = get_country_by_name(country_name)
+        event.country = country
+        event.save()
+        register_job_utility()
+        register_shift_utility()
+
+        sign_up_page = self.sign_up_page
+        sign_up_page.live_server_url = self.live_server_url
+
+        # Enter correct country
+        sign_up_page.go_to_sign_up_page()
+        parameters = {
+            'name': '',
+            'date_from': '',
+            'date_to': '',
+            'city': '',
+            'state': '',
+            'country': 'India'
+        }
+        sign_up_page.fill_search_form(parameters)
+        # Verify that the event shows up
+        self.assertEqual(sign_up_page.get_event_name(), 'event')
+
+    def test_search_job_name_present(self):
+        """
+        tests for search results on the basis of job name
+        """
+        register_event_utility()
+        register_job_utility()
+        register_shift_utility()
+
+        sign_up_page = self.sign_up_page
+        sign_up_page.live_server_url = self.live_server_url
+        sign_up_page.navigate_to_sign_up()
+        sign_up_page.click_to_view_jobs()
+
+        # Enter name of the job
+        parameters = {
+            'name': 'job',
+            'date_from': '',
+            'date_to': '',
+            'city': '',
+            'state': '',
+            'country': ''
+        }
+        sign_up_page.fill_job_search_form(parameters)
+        # Verify that the job shows up
+        self.assertEqual(sign_up_page.get_job_name(), 'job')
+
+    def test_search_job_both_date_present(self):
+        """
+        tests for search results on the basis of start and end date
+        """
+        register_event_utility()
+        register_job_utility()
+        register_shift_utility()
+
+        sign_up_page = self.sign_up_page
+        sign_up_page.live_server_url = self.live_server_url
+        sign_up_page.navigate_to_sign_up()
+        sign_up_page.click_to_view_jobs()
+
+        # Enter date range in which a job starts
+        parameters = {
+            'name': '',
+            'date_from': '05/10/2050',
+            'date_to': '06/15/2050',
+            'city': '',
+            'state': '',
+            'country': ''
+        }
+        sign_up_page.fill_job_search_form(parameters)
+        # Verify that the job shows up
+        self.assertEqual(sign_up_page.get_job_name(), 'job')
+
+    def test_search_job_start_date_present(self):
+        """
+        tests for search results on the basis of start date
+        """
+        register_event_utility()
+        register_job_utility()
+        register_shift_utility()
+
+        sign_up_page = self.sign_up_page
+        sign_up_page.live_server_url = self.live_server_url
+        # Enter only correct starting date
+        sign_up_page.navigate_to_sign_up()
+        sign_up_page.click_to_view_jobs()
+
+        parameters = {
+            'name': '',
+            'date_from': '05/10/2050',
+            'date_to': '',
+            'city': '',
+            'state': '',
+            'country': ''
+        }
+        sign_up_page.fill_job_search_form(parameters)
+        # Verify that the job shows up
+        self.assertEqual(sign_up_page.get_job_name(), 'job')
+
+    def test_search_job_end_date_present(self):
+        """
+        tests for search results on the basis of end date
+        """
+        register_event_utility()
+        register_job_utility()
+        register_shift_utility()
+
+        sign_up_page = self.sign_up_page
+        sign_up_page.live_server_url = self.live_server_url
+        sign_up_page.navigate_to_sign_up()
+        sign_up_page.click_to_view_jobs()
+
+        # Enter correct ending date
+        parameters = {
+            'name': '',
+            'date_from': '',
+            'date_to': '06/15/2050',
+            'city': '',
+            'state': '',
+            'country': ''
+        }
+        sign_up_page.fill_job_search_form(parameters)
+        # Verify that the job shows up
+        self.assertEqual(sign_up_page.get_job_name(), 'job')
+
+    def test_search_job_city_present(self):
+        """
+        tests for search results on the basis of city
+        """
+        event_obj = register_event_utility()
+        city_name = 'Roorkee'
+        city = get_city_by_name(city_name)
+        event_obj.city = city
+        event_obj.save()
+        register_job_utility()
+        register_shift_utility()
+
+        sign_up_page = self.sign_up_page
+        sign_up_page.live_server_url = self.live_server_url
+        sign_up_page.navigate_to_sign_up()
+        sign_up_page.click_to_view_jobs()
+
+        # Enter correct city
+        parameters = {
+            'name': '',
+            'date_from': '',
+            'date_to': '',
+            'city': 'Roorkee',
+            'state': '',
+            'country': ''
+        }
+        sign_up_page.fill_job_search_form(parameters)
+        # Verify that the job shows up
+        self.assertEqual(sign_up_page.get_job_name(), 'job')
+
+    def test_search_job_state_present(self):
+        """
+        tests for search results on the basis of state
+        """
+        event_obj = register_event_utility()
+        state_name = 'Uttarakhand'
+        state = get_state_by_name(state_name)
+        event_obj.state = state
+        event_obj.save()
+        register_job_utility()
+        register_shift_utility()
+
+        sign_up_page = self.sign_up_page
+        sign_up_page.live_server_url = self.live_server_url
+        sign_up_page.navigate_to_sign_up()
+        sign_up_page.click_to_view_jobs()
+
+        # Enter correct state
+        parameters = {
+            'name': '',
+            'date_from': '',
+            'date_to': '',
+            'city': '',
+            'state': 'Uttarakhand',
+            'country': ''
+        }
+        sign_up_page.fill_job_search_form(parameters)
+        # Verify that the job shows up
+        self.assertEqual(sign_up_page.get_job_name(), 'job')
+
+    def test_search_job_country_present(self):
+        """
+        tests for search results on the basis of country
+        """
+        event_obj = register_event_utility()
+        country_name = 'India'
+        country = get_country_by_name(country_name)
+        event_obj.country = country
+        event_obj.save()
+        register_job_utility()
+        register_shift_utility()
+
+        sign_up_page = self.sign_up_page
+        sign_up_page.live_server_url = self.live_server_url
+        sign_up_page.navigate_to_sign_up()
+        sign_up_page.click_to_view_jobs()
+
+        # Enter correct country
+        parameters = {
+            'name': '',
+            'date_from': '',
+            'date_to': '',
+            'city': '',
+            'state': '',
+            'country': 'India'
+        }
+        sign_up_page.fill_job_search_form(parameters)
+        # Verify that the job shows up
+        self.assertEqual(sign_up_page.get_job_name(), 'job')
+

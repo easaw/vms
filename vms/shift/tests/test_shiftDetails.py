@@ -1,196 +1,218 @@
+# third party
+from selenium import webdriver
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+from selenium.webdriver.firefox.options import Options
+
+# Django
 from django.contrib.staticfiles.testing import LiveServerTestCase
 
-from django.contrib.auth.models import User
-from administrator.models import Administrator
-from volunteer.models import Volunteer
-from event.models import Event
-from job.models import Job
-from shift.models import Shift, VolunteerShift
-
-from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException
+# local Django
+from pom.pages.authenticationPage import AuthenticationPage
+from pom.pages.shiftDetailsPage import ShiftDetailsPage
+from shift.utils import (create_volunteer, create_admin,
+                         create_event_with_details, create_job_with_details,
+                         create_shift_with_details, log_hours_with_details,
+                         register_volunteer_for_shift_utility)
 
 
 class ShiftDetails(LiveServerTestCase):
-    '''
+    """
     Contains Tests for View Shift Details Page
 
     Status of shift page is checked for following cases -
     - No Volunteer is registered
     - Volunteer registered but no hours logged
     - Volunteer with logged shift hours
-    '''
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Method to initiate class level objects.
+
+        This method initiates Firefox WebDriver, WebDriverWait and
+        the corresponding POM objects for this Test Class
+        """
+        firefox_options = Options()
+        firefox_options.add_argument('-headless')
+        cls.driver = webdriver.Firefox(firefox_options=firefox_options)
+        cls.driver.implicitly_wait(5)
+        cls.driver.maximize_window()
+        cls.shift_details_page = ShiftDetailsPage(cls.driver)
+        cls.authentication_page = AuthenticationPage(cls.driver)
+        cls.wait = WebDriverWait(cls.driver, 10)
+        super(ShiftDetails, cls).setUpClass()
 
     def setUp(self):
-        admin_user = User.objects.create_user(
-            username='admin',
-            password='admin')
-
-        Administrator.objects.create(
-            user=admin_user,
-            address='address',
-            city='city',
-            state='state',
-            country='country',
-            email='admin@admin.com',
-            phone_number='9999999999',
-            unlisted_organization='organization')
-
-        self.homepage = '/'
-        self.authentication_page = '/authentication/login/'
-        self.shift_list_page = '/shift/list_jobs/'
-        self.driver = webdriver.Firefox()
-        self.driver.implicitly_wait(5)
-        self.driver.maximize_window()
-        super(ShiftDetails, self).setUp()
+        """
+        Method consists of statements to be executed before
+        start of each test.
+        """
+        self.admin = create_admin()
+        self.login_admin()
+        self.shift = ShiftDetails.register_dataset()
 
     def tearDown(self):
-        self.driver.quit()
-        super(ShiftDetails, self).tearDown()
+        """
+        Method consists of statements to be executed at
+        end of each test.
+        """
+        self.authentication_page.logout()
 
-    def login(self, credentials):
-        self.driver.get(self.live_server_url + self.authentication_page)
-        self.driver.find_element_by_id(
-            'id_login').send_keys(credentials['username'])
-        self.driver.find_element_by_id('id_password').send_keys(
-            credentials['password'])
-        self.driver.find_element_by_xpath('//form[1]').submit()
+    @classmethod
+    def tearDownClass(cls):
+        """
+        Class method to quit the Firefox WebDriver session after
+        execution of all tests in class.
+        """
+        cls.driver.quit()
+        super(ShiftDetails, cls).tearDownClass()
 
-    def register_volunteer_utility(self, name):
-        volunteer_user = User.objects.create_user(
-            username=name,
-            password='volunteer')
+    def login_admin(self):
+        """
+        Utility function to login as administrator.
+        """
+        authentication_page = self.authentication_page
+        authentication_page.server_url = self.live_server_url
+        authentication_page.login({
+            'username': 'admin',
+            'password': 'admin'
+        })
 
-        volunteer = Volunteer.objects.create(
-            user=volunteer_user,
-            first_name='Michael',
-            last_name='Reed',
-            address='address',
-            city='city',
-            state='state',
-            country='country',
-            phone_number='9999999999',
-            email='volunteer@volunteer.com',
-            unlisted_organization='organization')
+    @staticmethod
+    def register_dataset():
+        """
+        Utility function to create data for testing
+        :return: Shift type of object.
+        """
+        e1 = create_event_with_details({
+            'name': 'event',
+            'start_date': '2050-06-15',
+            'end_date': '2050-06-17',
+            'description': 'event-description',
+            'address': 'event-address',
+            'venue': 'event-venue'
+        })
+        j1 = create_job_with_details({
+            'name': 'job',
+            'start_date': '2050-06-15',
+            'end_date': '2050-06-15',
+            'description': 'job description',
+            'event': e1
+        })
+        s1 = create_shift_with_details({
+            'date': '2050-06-15',
+            'start_time': '09:00',
+            'end_time': '15:00',
+            'max_volunteers': '6',
+            'job': j1,
+            'address': 'shift-address',
+            'venue': 'shift-venue'
+        })
+        return s1
 
-        return volunteer
-
-    def register_shift_utility(self, ):
-
-        # create shift and log hours
-        event = Event.objects.create(
-            name='event',
-            start_date='2017-06-15',
-            end_date='2017-06-17')
-
-        job = Job.objects.create(
-            name='job',
-            start_date='2017-06-15',
-            end_date='2017-06-15',
-            event=event)
-
-        shift = Shift.objects.create(
-            date='2017-06-15',
-            start_time='09:00',
-            end_time='15:00',
-            max_volunteers='6',
-            job=job)
-
-        return shift
-
-    def log_hours_utility(self, shift, volunteer, s_time, e_time):
-        VolunteerShift.objects.create(
-            shift=shift,
-            volunteer=volunteer,
-            start_time=s_time,
-            end_time=e_time)
-
-    def register_volunteer_for_shift_utility(self, shift, volunteer):
-        vol_shift = VolunteerShift.objects.create(
-            shift=shift,
-            volunteer=volunteer)
-        return vol_shift
-
-    def navigate_to_shift_details_view(self):
-        self.driver.get(self.live_server_url + self.shift_list_page)
-        self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]/td[5]//a').click()
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[7]').text, 'View')
-        self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[7]//a').click()
+    def wait_for_home_page(self):
+        """
+        Utility function to perform explicit wait for home page.
+        """
+        self.wait.until(
+            EC.presence_of_element_located(
+                (By.XPATH,
+                 "//h1[contains(text(), 'Volunteer Management System')]"
+                 )
+            )
+        )
 
     def test_view_with_unregistered_volunteers(self):
-        self.login({'username': 'admin', 'password': 'admin'})
-        shift = self.register_shift_utility()
-        self.navigate_to_shift_details_view()
+        """
+        Test display of shift details with no registered volunteer.
+        """
+        shift_details_page = self.shift_details_page
+        shift_details_page.live_server_url = self.live_server_url
 
-        # verify details and slots remaining
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table[1]//tr//td[1]').text, 'job')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table[1]//tr//td[3]').text, 'June 15, 2017')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table[1]//tr//td[9]').text, '6')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table[1]//tr//td[4]').text, '9 a.m.')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table[1]//tr//td[5]').text, '3 p.m.')
+        self.wait_for_home_page()
 
-        # verify that there are no registered shifts or logged hours
-        self.assertEqual(
-            self.driver.find_element_by_class_name('alert-success').text,
-            'There are currently no volunteers assigned to this shift. Please assign volunteers to view more details')
+        shift_details_page.navigate_to_shift_details_view()
+
+        # Verify details and slots remaining
+        self.assertEqual(shift_details_page.get_shift_job(), 'job')
+        self.assertEqual(shift_details_page.get_shift_date(), 'June 15, 2050')
+        self.assertEqual(shift_details_page.get_max_shift_volunteer(), '6')
+        self.assertEqual(shift_details_page.get_shift_start_time(), '9 a.m.')
+        self.assertEqual(shift_details_page.get_shift_end_time(), '3 p.m.')
+
+        # Verify that there are no registered shifts or logged hours
+        self.assertEqual(shift_details_page.get_message_box(),
+                         'There are currently no volunteers assigned '
+                         'to this shift. Please assign volunteers to '
+                         'view more details'
+                         )
 
     def test_view_with_only_registered_volunteers(self):
-        self.login({'username': 'admin', 'password': 'admin'})
-        shift = self.register_shift_utility()
-        volunteer = self.register_volunteer_utility('volunteer')
-        volunteer_shift = self.register_volunteer_for_shift_utility(
-            shift, volunteer)
-        self.navigate_to_shift_details_view()
+        """
+        Test display of shift details with registered volunteer.
+        """
+        shift_details_page = self.shift_details_page
+        shift_details_page.live_server_url = self.live_server_url
+        volunteer = create_volunteer()
+        volunteer_shift = register_volunteer_for_shift_utility(
+            self.shift, volunteer)
+
+        self.wait_for_home_page()
+
+        shift_details_page.navigate_to_shift_details_view()
 
         # verify that the shift slot is decreased by 1
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table[1]//tr//td[1]').text, 'job')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table[1]//tr//td[9]').text, '5')
+        self.assertEqual(shift_details_page.get_shift_job(), 'job')
+        self.assertEqual(shift_details_page.get_max_shift_volunteer(), '5')
 
         # verify that assigned volunteers shows up but no logged hours yet
+        self.assertEqual(len(shift_details_page.get_registered_volunteers()), 1)
         self.assertEqual(
-            len(self.driver.find_elements_by_xpath('//table[2]//tbody//tr')), 1)
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table[2]//tr//td[1]').text, 'Michael')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table[2]//tr//td[9]').text, 'volunteer@volunteer.com')
-        self.assertEqual(self.driver.find_element_by_class_name(
-            'alert-success').text, 'There are no logged hours at the moment')
+            shift_details_page.get_registered_volunteer_name(),
+            'Prince'
+        )
+        self.assertEqual(
+            shift_details_page.get_registered_volunteer_email(),
+            'volunteer@volunteer.com'
+        )
+        self.assertEqual(
+            shift_details_page.get_message_box(),
+            'There are no logged hours at the moment'
+        )
 
     def test_view_with_logged_hours(self):
-        self.login({'username': 'admin', 'password': 'admin'})
-        shift = self.register_shift_utility()
-        volunteer = self.register_volunteer_utility('volunteer')
-        self.log_hours_utility(shift, volunteer, '13:00', '14:00')
-        self.navigate_to_shift_details_view()
+        """
+        Test display of shift details with hours logged in the shift.
+        """
+        shift_details_page = self.shift_details_page
+        shift_details_page.live_server_url = self.live_server_url
+        volunteer = create_volunteer()
+
+        log_hours_with_details(volunteer, self.shift, '13:00', '14:00')
+
+        self.wait_for_home_page()
+
+        shift_details_page.navigate_to_shift_details_view()
 
         # verify that the shift slot is decreased by 1
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table[1]//tr//td[1]').text, 'job')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table[1]//tr//td[9]').text, '5')
+        self.assertEqual(shift_details_page.get_shift_job(), 'job')
+        self.assertEqual(shift_details_page.get_max_shift_volunteer(), '5')
 
         # verify that assigned volunteers shows up
+        self.assertEqual(len(shift_details_page.get_registered_volunteers()), 1)
         self.assertEqual(
-            len(self.driver.find_elements_by_xpath('//table[2]//tbody//tr')), 1)
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table[2]//tr//td[9]').text, 'volunteer@volunteer.com')
+            shift_details_page.get_registered_volunteer_email(),
+            'volunteer@volunteer.com'
+        )
 
         # verify that hours are logged by volunteer
+        self.assertEqual(len(shift_details_page.get_logged_volunteers()), 1)
         self.assertEqual(
-            len(self.driver.find_elements_by_xpath('//table[3]//tbody//tr')), 1)
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table[3]//tr//td[1]').text, 'Michael')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table[3]//tr//td[4]').text, '1 p.m.')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table[3]//tr//td[5]').text, '2 p.m.')
+            shift_details_page.get_logged_volunteer_name(),
+            'Prince'
+        )
+        self.assertEqual(shift_details_page.get_logged_start_time(), '1 p.m.')
+        self.assertEqual(shift_details_page.get_logged_end_time(), '2 p.m.')
+

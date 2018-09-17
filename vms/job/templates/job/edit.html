@@ -26,13 +26,13 @@
             <form class="form-horizontal" action="" method="post">
                 {% csrf_token %}
                 <fieldset>
-                    <legend>{% trans "Edit Job" %}</legend>
+                    <legend class="header">{% trans "Edit Job" %}</legend>
                     <div class="form-group">
                         <label class="col-md-2 control-label">
                             {% trans "Event:" %}
                         </label>
                         <div class="col-md-8">
-                            <select class="form-control" name="event_id" id="events" onchange="update_event_dates()">
+                            <select class="form-control" name="event_id" id="events" onchange="updateEventDates()">
                                 {% for event in event_list %}
                                     {% if event.name == job.event.name %}
                                         <option selected value="{{ event.id }}" start_date="{{ event.start_date }}" end_date="{{ event.end_date }}">{{ event.name }}</option>

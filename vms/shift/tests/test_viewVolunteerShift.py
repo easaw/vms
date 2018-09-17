@@ -1,235 +1,277 @@
-from django.test import TestCase
-from django.contrib.staticfiles.testing import LiveServerTestCase
+# standard library
+import re
 
-from django.contrib.auth.models import User
-from volunteer.models import Volunteer
-from event.models import Event
-from job.models import Job
-from shift.models import Shift, VolunteerShift
-
+# third party
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+from selenium.webdriver.firefox.options import Options
 
-from organization.models import Organization #hack to pass travis,Bug in Code
-import re
+# Django
+from django.contrib.staticfiles.testing import LiveServerTestCase
+
+# local Django
+from pom.pages.authenticationPage import AuthenticationPage
+from pom.pages.manageShiftPage import ManageShiftPage
+from pom.pages.upcomingShiftsPage import UpcomingShiftsPage
+from shift.utils import (create_second_city, register_past_job_utility,
+                         create_second_country, create_volunteer,
+                         create_event_with_details, create_job_with_details,
+                         create_shift_with_details, register_past_shift_utility,
+                         create_organization_with_details,
+                         register_volunteer_for_shift_utility,
+                         create_volunteer_with_details,
+                         register_past_event_utility, create_second_state)
 
 
 class ViewVolunteerShift(LiveServerTestCase):
-    '''
-    '''
+    """
+    Contains Tests for View Volunteer Shift Details Page
+
+    Status of shift page is checked for following cases -
+    - Access another registered volunteer
+    - Access another unregistered volunteer
+    - Access no assigned shifts view
+    - Only future shifts displayed in Upcoming Shifts
+    - View Assigned and Unlogged shifts
+    - Cancel shift registration
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Method to initiate class level objects.
+
+        This method initiates Firefox WebDriver, WebDriverWait and
+        the corresponding POM objects for this Test Class
+        """
+        firefox_options = Options()
+        firefox_options.add_argument('-headless')
+        cls.driver = webdriver.Firefox(firefox_options=firefox_options)
+        cls.driver.implicitly_wait(5)
+        cls.driver.maximize_window()
+        cls.manage_shift_page = ManageShiftPage(cls.driver)
+        cls.upcoming_shift_page = UpcomingShiftsPage(cls.driver)
+        cls.authentication_page = AuthenticationPage(cls.driver)
+        cls.wait = WebDriverWait(cls.driver, 10)
+        super(ViewVolunteerShift, cls).setUpClass()
+
     def setUp(self):
-        volunteer_user = User.objects.create_user(
-                username = 'volunteer',
-                password = 'volunteer')
-
-        volunteer = Volunteer.objects.create(
-                user = volunteer_user,
-                address = 'address',
-                city = 'city',
-                state = 'state',
-                country = 'country',
-                phone_number = '9999999999',
-                email = 'volunteer@volunteer.com',
-                unlisted_organization = 'organization')
-
-        # create an org prior to registration. Bug in Code
-        # added to pass CI
-        volunteer_id = Volunteer.objects.get(user__username = 'volunteer').pk
-        Organization.objects.create(
-                name = 'DummyOrg')
-
-        self.homepage = '/'
-        self.authentication_page = '/authentication/login/'
-        self.driver = webdriver.Firefox()
-        self.driver.implicitly_wait(5)
-        self.driver.maximize_window()
-        super(ViewVolunteerShift, self).setUp()
+        """
+        Method consists of statements to be executed before
+        start of each test.
+        """
+        self.v1 = create_volunteer()
+        self.login_volunteer()
 
     def tearDown(self):
-        self.driver.quit()
-        super(ViewVolunteerShift, self).tearDown()
+        """
+        Method consists of statements to be executed at
+        end of each test.
+        """
+        self.authentication_page.logout()
 
-    def login(self, credentials):
-        self.driver.get(self.live_server_url + self.authentication_page)
-        self.driver.find_element_by_id('id_login').send_keys(credentials['username'])
-        self.driver.find_element_by_id('id_password').send_keys(credentials['password'])
-        self.driver.find_element_by_xpath('//form[1]').submit()
+    @classmethod
+    def tearDownClass(cls):
+        """
+        Class method to quit the Firefox WebDriver session after
+        execution of all tests in class.
+        """
+        cls.driver.quit()
+        super(ViewVolunteerShift, cls).tearDownClass()
+
+    def login_volunteer(self):
+        """
+        Utility function to login as volunteer.
+        """
+        credentials = {
+            'username': 'volunteer',
+            'password': 'volunteer'
+        }
+        self.authentication_page.server_url = self.live_server_url
+        self.authentication_page.login(credentials)
+
+    def register_dataset(self):
+        """
+        Utility function to register data for testing.
+        """
+        created_event = create_event_with_details({
+            'name': 'event-four',
+            'start_date': '2050-06-01',
+            'end_date': '2050-06-10',
+            'address': 'event-address',
+            'description': 'event-description',
+            'venue': 'event-venue'
+        })
+        created_job = create_job_with_details({
+            'name': 'jobOneInEventFour',
+            'start_date': '2050-06-01',
+            'end_date': '2050-06-10',
+            'description': 'job description',
+            'event': created_event
+        })
+        created_shift = create_shift_with_details({
+            'date': '2050-06-01',
+            'start_time': '09:00',
+            'end_time': '15:00',
+            'max_volunteers': '10',
+            'job': created_job,
+            'address': 'shift-address',
+            'venue': 'shift-venue'
+        })
+        registered_shift =\
+            register_volunteer_for_shift_utility(created_shift, self.v1)
 
     def test_access_another_existing_volunteer_view(self):
-        '''
-        test_volunteer_user = User.objects.create_user(
-                username = 'test_volunteer',
-                password = 'volunteer')
+        """
+        Test error raised while volunteer is trying to access profile page of
+        another existing volunteer.
+        """
+        upcoming_shift_page = self.upcoming_shift_page
+        upcoming_shift_page.live_server_url = self.live_server_url
+        self.wait.until(
+            EC.presence_of_element_located(
+                (By.XPATH,
+                 "//h1[contains(text(), 'Volunteer Management System')]"
+                 )
+            )
+        )
+        upcoming_shift_page.view_upcoming_shifts()
+        self.assertEqual(upcoming_shift_page.get_info_box(),
+                         upcoming_shift_page.no_shift_message)
+        second_country = create_second_country()
+        second_state = create_second_state()
+        second_city = create_second_city()
+        details = {
+            'username': 'test_volunteer',
+            'first_name': 'volunteer-first-name',
+            'last_name': 'volunteer-last-name',
+            'address': 'volunteer-address',
+            'city': second_city,
+            'state': second_state,
+            'country': second_country,
+            'phone_number': '9999999999',
+            'email': 'volunteer-email2@systers.org'
+        }
 
-        test_volunteer = Volunteer.objects.create(
-                user = test_volunteer_user,
-                address = 'address',
-                city = 'city',
-                state = 'state',
-                country = 'country',
-                phone_number = '9999999999',
-                email = 'test_volunteer@volunteer.com',
-                unlisted_organization = 'organization')
+        org_name = 'volunteer-organization'
+        org_obj = create_organization_with_details(org_name)
+        test_volunteer = create_volunteer_with_details(details, org_obj)
 
-        test_volunteer_id = Volunteer.objects.get(user__username = 'test_volunteer').pk
-
-        credentials = {'username' : 'volunteer', 'password' : 'volunteer'}
-        self.login(credentials)
-        self.driver.get(self.live_server_url + '/shift/view_volunteer_shifts/' + str(test_volunteer_id))
-        '''
-        pass
+        upcoming_shift_page.get_page(
+            upcoming_shift_page.live_server_url,
+            upcoming_shift_page.view_shift_page + str(test_volunteer.id)
+        )
+        found = re.search('You don\'t have the required rights',
+                          self.driver.page_source)
+        self.assertNotEqual(found, None)
 
     def test_access_another_nonexisting_volunteer_view(self):
-        credentials = {'username' : 'volunteer', 'password' : 'volunteer'}
-        self.login(credentials)
-        self.driver.get(self.live_server_url + '/shift/view_volunteer_shifts/' + '65459')
-        found = re.search('Not Found', self.driver.page_source)
+        """
+        Test error raised while volunteer is trying to access profile page of
+        another non-existing volunteer.
+        """
+        upcoming_shift_page = self.upcoming_shift_page
+        upcoming_shift_page.live_server_url = self.live_server_url
+        self.wait.until(
+            EC.presence_of_element_located(
+                (By.XPATH,
+                 "//h1[contains(text(), 'Volunteer Management System')]"
+                 )
+            )
+        )
+        upcoming_shift_page.get_page(
+            upcoming_shift_page.live_server_url,
+            upcoming_shift_page.view_shift_page + '65459'
+        )
+        found = re.search('You don\'t have the required rights',
+                          self.driver.page_source)
         self.assertNotEqual(found, None)
 
     def test_view_without_any_assigned_shift(self):
-        credentials = {'username' : 'volunteer', 'password' : 'volunteer'}
-        self.login(credentials)
-        self.driver.find_element_by_link_text('Upcoming Shifts').send_keys("\n")
-        self.assertEqual(self.driver.find_element_by_class_name(
-            'alert-info').text, 'You do not have any upcoming shifts.')
-
-    def register_dataset(self, parameters):
-        try:
-            org = Organization.objects.create(name = parameters['org'])
-        except IntegrityError:
-            org = Organization.objects.get(name = parameters['org'])
-
-
-        volunteer = Volunteer.objects.get(user__username = 'volunteer')
-
-        # create shift and log hours
-        event = Event.objects.create(
-                    name = parameters['event']['name'],
-                    start_date = parameters['event']['start_date'],
-                    end_date = parameters['event']['end_date'])
-
-        job = Job.objects.create(
-                name = parameters['job']['name'],
-                start_date = parameters['job']['start_date'],
-                end_date = parameters['job']['end_date'],
-                event = event)
-
-        shift = Shift.objects.create(
-                date = parameters['shift']['date'],
-                start_time = parameters['shift']['start_time'],
-                end_time = parameters['shift']['end_time'],
-                max_volunteers = parameters['shift']['max_volunteers'],
-                job = job)
-
-        # shift is assigned to volunteer
-        VolunteerShift.objects.create(
-                shift = shift,
-                volunteer = volunteer)
+        """
+        Test display of shifts with no assigned shifts.
+        """
+        upcoming_shift_page = self.upcoming_shift_page
+        upcoming_shift_page.view_upcoming_shifts()
+        self.assertEqual(upcoming_shift_page.get_info_box(),
+                         upcoming_shift_page.no_shift_message)
 
     def test_view_with_assigned_and_unlogged_shift(self):
-        parameters = {'org' : 'org-one',
-                'event' : { 
-                    'name' : 'event-four',
-                    'start_date' : '2017-06-01',
-                    'end_date' : '2017-06-10'},
-                'job' : { 
-                    'name' : 'jobOneInEventFour',
-                    'start_date' : '2017-06-01',
-                    'end_date' : '2017-06-01'},
-                'shift' : {
-                    'date' : '2017-06-01',
-                    'start_time' : '09:00',
-                    'end_time' : '15:00',
-                    'max_volunteers' : '10'}}
+        """
+        Test display of assigned but unlogged shift.
+        """
+        self.register_dataset()
+        upcoming_shift_page = self.upcoming_shift_page
+        upcoming_shift_page.live_server_url = self.live_server_url
+        upcoming_shift_page.view_upcoming_shifts()
 
-        self.register_dataset(parameters)
-        credentials = {'username' : 'volunteer', 'password' : 'volunteer'}
-        self.login(credentials)
-        self.driver.find_element_by_link_text('Upcoming Shifts').send_keys("\n")
+        self.assertEqual(
+            upcoming_shift_page.get_shift_job(),
+            'jobOneInEventFour'
+        )
+        self.assertEqual(upcoming_shift_page.get_shift_date(), 'June 1, 2050')
+        self.assertEqual(upcoming_shift_page.get_shift_start_time(), '9 a.m.')
+        self.assertEqual(upcoming_shift_page.get_shift_end_time(), '3 p.m.')
 
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[1]').text, 'jobOneInEventFour')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[2]').text, 'June 1, 2017')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[3]').text, '9 a.m.')
-        self.assertEqual(self.driver.find_element_by_xpath(
-            '//table//tbody//tr[1]//td[4]').text, '3 p.m.')
+    def test_future_shifts_appear_in_upcoming_shifts(self):
+        """
+        Test display of only future shifts.
+        """
+        self.register_dataset()
+        upcoming_shift_page = self.upcoming_shift_page
+        upcoming_shift_page.live_server_url = self.live_server_url
+        upcoming_shift_page.view_upcoming_shifts()
 
-    def test_log_hours_and_logged_shift_does_not_appear_in_upcoming_shifts(self):
-        parameters = {'org' : 'org-one',
-                'event' : { 
-                    'name' : 'event-four',
-                    'start_date' : '2017-06-01',
-                    'end_date' : '2017-06-10'},
-                'job' : { 
-                    'name' : 'jobOneInEventFour',
-                    'start_date' : '2017-06-01',
-                    'end_date' : '2017-06-01'},
-                'shift' : {
-                    'date' : '2017-06-01',
-                    'start_time' : '09:00',
-                    'end_time' : '15:00',
-                    'max_volunteers' : '10'}}
+        self.assertEqual(
+            upcoming_shift_page.get_shift_job(),
+            'jobOneInEventFour'
+        )
+        self.assertEqual(upcoming_shift_page.get_shift_date(), 'June 1, 2050')
+        self.assertEqual(upcoming_shift_page.get_shift_start_time(), '9 a.m.')
+        self.assertEqual(upcoming_shift_page.get_shift_end_time(), '3 p.m.')
 
-        self.register_dataset(parameters)
-        credentials = {'username' : 'volunteer', 'password' : 'volunteer'}
-        self.login(credentials)
-        self.driver.find_element_by_link_text('Upcoming Shifts').send_keys("\n")
+    def test_past_shifts_donot_appear_in_upcoming_shifts(self):
+        register_past_event_utility()
+        register_past_job_utility()
+        shift = register_past_shift_utility()
+        register_volunteer_for_shift_utility(shift, self.v1)
 
-        self.assertEqual(self.driver.find_element_by_xpath(
-                '//table//tbody//tr[1]//td[5]').text, 'Log Hours')
-        self.driver.find_element_by_xpath(
-                '//table//tbody//tr[1]//td[5]/a').click()
-
-        self.driver.find_element_by_xpath(
-                '//input[@name = "start_time"]').send_keys('09:00')
-        self.driver.find_element_by_xpath(
-                '//input[@name = "end_time"]').send_keys('12:00')
-        self.driver.find_element_by_xpath('//form').submit()
-
-        # check logged shift does not appear in Upcoming Shifts
-        self.driver.find_element_by_link_text('Upcoming Shifts').click()
-        self.assertEqual(self.driver.find_element_by_class_name(
-            'alert-info').text, 'You do not have any upcoming shifts.')
-        with self.assertRaises(NoSuchElementException):
-            self.driver.find_element_by_xpath('//table')
+        upcoming_shift_page = self.upcoming_shift_page
+        upcoming_shift_page.live_server_url = self.live_server_url
+        upcoming_shift_page.view_upcoming_shifts()
+        self.assertEqual(upcoming_shift_page.get_info_box(),
+                         upcoming_shift_page.no_shift_message)
+        self.assertRaisesRegexp(NoSuchElementException,
+                                'Unable to locate element: //table',
+                                upcoming_shift_page.get_result_container)
 
     def test_cancel_shift_registration(self):
-        parameters = {'org' : 'org-one',
-                'event' : { 
-                    'name' : 'event-four',
-                    'start_date' : '2017-06-01',
-                    'end_date' : '2017-06-10'},
-                'job' : { 
-                    'name' : 'jobOneInEventFour',
-                    'start_date' : '2017-06-01',
-                    'end_date' : '2017-06-01'},
-                'shift' : {
-                    'date' : '2017-06-01',
-                    'start_time' : '09:00',
-                    'end_time' : '14:00',
-                    'max_volunteers' : '10'}}
+        """
+        Test cancellation of registered shift.
+        """
+        self.register_dataset()
+        upcoming_shift_page = self.upcoming_shift_page
+        upcoming_shift_page.live_server_url = self.live_server_url
+        manage_shift_page = self.manage_shift_page
+        upcoming_shift_page.view_upcoming_shifts()
 
-        self.register_dataset(parameters)
-        credentials = {'username' : 'volunteer', 'password' : 'volunteer'}
-        self.login(credentials)
-        self.driver.find_element_by_link_text('Upcoming Shifts').send_keys("\n")
+        self.assertEqual(upcoming_shift_page.get_cancel_shift().text,
+                         'Cancel Shift Registration')
+        upcoming_shift_page.cancel_shift()
 
-        self.assertEqual(self.driver.find_element_by_xpath(
-                '//table//tbody//tr[1]//td[6]').text, 'Cancel Shift Registration')
-        self.driver.find_element_by_xpath(
-                '//table//tbody//tr[1]//td[6]/a').click()
-
-        self.assertEqual(self.driver.find_element_by_class_name(
-            'panel-title').text, 'Cancel Shift Confirmation')
-        self.assertEqual(self.driver.find_element_by_class_name('btn-danger').text,
-                'Yes, Cancel this Shift')
-        self.driver.find_element_by_xpath('//form').submit()
+        self.assertNotEqual(manage_shift_page.get_cancellation_box(), None)
+        self.assertEqual(manage_shift_page.get_cancellation_header(),
+                         'Cancel Shift Confirmation')
+        self.assertEqual(manage_shift_page.get_cancellation_message(),
+                         'Yes, Cancel this Shift')
+        manage_shift_page.submit_form()
 
         # check shift removed from upcoming shifts
-        self.driver.find_element_by_link_text('Upcoming Shifts').click()
-        self.assertEqual(self.driver.find_element_by_class_name(
-            'alert-info').text, 'You do not have any upcoming shifts.')
-        with self.assertRaises(NoSuchElementException):
-            self.driver.find_element_by_xpath('//table')
+        upcoming_shift_page.view_upcoming_shifts()
+        self.assertEqual(upcoming_shift_page.get_info_box(),
+                         upcoming_shift_page.no_shift_message)
+        self.assertRaisesRegexp(NoSuchElementException,
+                                'Unable to locate element: //table',
+                                upcoming_shift_page.get_result_container)

@@ -1,394 +1,287 @@
-from django.test import TestCase
-from django.contrib.staticfiles.testing import LiveServerTestCase
-
-from django.contrib.auth.models import User
-
+# third party
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+from selenium.webdriver.firefox.options import Options
 
-from volunteer.models import Volunteer
-from administrator.models import Administrator
-from organization.models import Organization #hack to pass travis,Bug in Code
+# Django
+from django.contrib.staticfiles.testing import LiveServerTestCase
 
-import re
+# local Django
+from pom.pages.authenticationPage import AuthenticationPage
+from pom.pages.homePage import HomePage
+from pom.pageUrls import PageUrls
 
-
-class TestAccessControl(LiveServerTestCase):
-    '''
-    TestAccessControl class contains the functional tests to check Admin and
-    Volunteer can access '/home' view of VMS. Following tests are included:
-    Administrator:
-        - Login admin with correct credentials
-        - Login admin with incorrect credentials 
-    Volunteer:
-        - Login volunteer with correct credentials
-        - Login volunteer with incorrect credentials 
-    '''
-    def setUp(self):
-        admin_user = User.objects.create_user(
-                username = 'admin',
-                password = 'admin',
-                email = 'admin@admin.com')
-
-        volunteer_user = User.objects.create_user(
-                username = 'volunteer',
-                password = 'volunteer',
-                email = 'volunteer@volunteer.com')
-
-        Administrator.objects.create(
-                user = admin_user,
-                address = 'address',
-                city = 'city',
-                state = 'state',
-                country = 'country',
-                phone_number = '9999999999',
-                unlisted_organization = 'organization')
-
-        Volunteer.objects.create(
-                user = volunteer_user,
-                address = 'address',
-                city = 'city',
-                state = 'state',
-                country = 'country',
-                phone_number = '9999999999',
-                unlisted_organization = 'organization')
-
-        # create an org prior to registration. Bug in Code
-        # added to pass CI
-        Organization.objects.create(
-                name = 'DummyOrg')
-
-        self.homepage = '/'
-        self.authentication_page = '/authentication/login/'
-        self.driver = webdriver.Firefox()
-        self.driver.maximize_window()
-        super(TestAccessControl, self).setUp()
-
-    def tearDown(self):
-        self.driver.quit()
-        super(TestAccessControl, self).tearDown()
+from shift.utils import (create_admin, create_volunteer)
 
 
-    def test_correct_admin_credentials(self):
-        '''
-        Method to simulate logging in of a valid admin user and check if they
-        redirected to '/home' and no errors are generated.
-        '''
-        self.driver.get(self.live_server_url + self.homepage)
-        self.driver.find_element_by_link_text('Log In').click()
-
-        self.assertEqual(self.driver.current_url, self.live_server_url +
-                self.authentication_page)
-
-        self.driver.find_element_by_id('id_login').send_keys('admin')
-        self.driver.find_element_by_id('id_password').send_keys('admin')
-        self.driver.find_element_by_xpath('//form[1]').submit()
-
-        self.assertEqual(self.driver.current_url, self.live_server_url +
-                self.homepage)
-
-        with self.assertRaises(NoSuchElementException):
-            self.driver.find_element_by_class_name('alert-danger')
-
-    def test_incorrect_admin_credentials(self):
-        '''
-        Method to simulate logging in of an Invalid admin user and check if
-        they are displayed an error and redirected to login page again.
-        '''
-        self.driver.get(self.live_server_url + self.homepage)
-        self.driver.find_element_by_link_text('Log In').click()
-
-        self.assertEqual(self.driver.current_url, self.live_server_url +
-                self.authentication_page)
-
-        self.driver.find_element_by_id('id_login').send_keys('admin')
-        self.driver.find_element_by_id('id_password').send_keys('wrong_password')
-        self.driver.find_element_by_xpath('//form[1]').submit()
-
-        self.assertNotEqual(self.driver.current_url, self.live_server_url +
-                self.homepage)
-
-        self.assertEqual(self.driver.current_url, self.live_server_url +
-                self.authentication_page)
-
-        self.assertNotEqual(self.driver.find_element_by_class_name(
-            'alert-danger'), None)
-
-    def test_correct_volunteer_credentials(self):
-        '''
-        Method to simulate logging in of a valid volunteer user and check if
-        they are redirected to '/home'
-        '''
-        self.driver.get(self.live_server_url + self.homepage)
-        self.driver.find_element_by_link_text('Log In').click()
-
-        self.assertEqual(self.driver.current_url, self.live_server_url +
-                self.authentication_page)
-
-        self.driver.find_element_by_id('id_login').send_keys('volunteer')
-        self.driver.find_element_by_id('id_password').send_keys('volunteer')
-        self.driver.find_element_by_xpath('//form[1]').submit()
-
-        self.assertEqual(self.driver.current_url, self.live_server_url +
-                self.homepage)
-
-        with self.assertRaises(NoSuchElementException):
-            self.driver.find_element_by_class_name('alert-danger')
-
-    def test_incorrect_volunteer_credentials(self):
-        '''
-        Method to simulate logging in of a Invalid volunteer user and check if
-        they are displayed an error and redirected to login page again.
-        '''
-        self.driver.get(self.live_server_url + self.homepage)
-        self.driver.find_element_by_link_text('Log In').click()
-
-        self.assertEqual(self.driver.current_url, self.live_server_url +
-                self.authentication_page)
-
-        self.driver.find_element_by_id('id_login').send_keys('volunteer')
-        self.driver.find_element_by_id('id_password').send_keys('wrong_password')
-        self.driver.find_element_by_xpath('//form[1]').submit()
-
-        self.assertNotEqual(self.driver.current_url, self.live_server_url +
-                self.homepage)
-
-        self.assertEqual(self.driver.current_url, self.live_server_url +
-                self.authentication_page)
-
-        self.assertNotEqual(self.driver.find_element_by_class_name(
-            'alert-danger'), None)
-
-
-# Class contains failing test cases which have been documented
-# Test class commented out to prevent travis build failure
-"""class CheckURLAccess(LiveServerTestCase):
-    '''
+class CheckURLAccess(LiveServerTestCase):
+    """
     CheckURLAccess contains methods to browse(via URL) a volunteer page view
     after logging in from an admin account and vice-versa. Tests included:
     - Admin cannot access volunteer URL's
     - Volunteer cannot access admin URL's
-    '''
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Method to initiate class level objects.
+
+        This method initiates Firefox WebDriver, WebDriverWait and
+        the corresponding POM objects for this Test Class
+        """
+        firefox_options = Options()
+        firefox_options.add_argument('-headless')
+        cls.driver = webdriver.Firefox(firefox_options=firefox_options)
+        cls.driver.implicitly_wait(5)
+        cls.driver.maximize_window()
+        cls.home_page = HomePage(cls.driver)
+        cls.authentication_page = AuthenticationPage(cls.driver)
+        cls.wait = WebDriverWait(cls.driver, 10)
+        super(CheckURLAccess, cls).setUpClass()
+
     def setUp(self):
-        admin_user = User.objects.create_user(
-                username = 'admin',
-                password = 'admin',
-                email = 'admin@admin.com')
-
-        volunteer_user = User.objects.create_user(
-                username = 'volunteer',
-                password = 'volunteer',
-                email = 'volunteer@volunteer.com')
-
-        Administrator.objects.create(
-                user = admin_user,
-                address = 'address',
-                city = 'city',
-                state = 'state',
-                country = 'country',
-                phone_number = '9999999999',
-                unlisted_organization = 'organization')
-
-        Volunteer.objects.create(
-                user = volunteer_user,
-                address = 'address',
-                city = 'city',
-                state = 'state',
-                country = 'country',
-                phone_number = '9999999999',
-                unlisted_organization = 'organization')
-
-        self.authentication_page = '/authentication/login/'
-        self.driver = webdriver.Firefox()
-        self.driver.maximize_window()
-        super(CheckURLAccess, self).setUp()
+        """
+        Method consists of statements to be executed before
+        start of each test.
+        """
+        create_admin()
+        create_volunteer()
 
     def tearDown(self):
-        self.driver.quit()
-        super(CheckURLAccess, self).tearDown()
+        """
+        Method consists of statements to be executed at
+        end of each test.
+        """
+        pass
+
+    @classmethod
+    def tearDownClass(cls):
+        """
+        Class method to quit the Firefox WebDriver session after
+        execution of all tests in class.
+        """
+        cls.driver.quit()
+        super(CheckURLAccess, cls).tearDownClass()
+
+    def verify_admin_page_error(self, admin_url):
+        """
+        Utility function to verify errors raised on the
+        pages when user tries to admin pages provided as
+        admin_url in param.
+        :param admin_url: URL of admin page to check errors on.
+        """
+        home_page = self.home_page
+        home_page.get_page(self.live_server_url, admin_url)
+        heading = home_page.get_no_admin_right()
+        body = home_page.get_no_admin_right_content()
+        self.assertNotEqual(heading, None)
+        self.assertNotEqual(body, None)
+        self.assertEqual(heading.text, 'No Access')
+        self.assertEqual(body.text, 'You don\'t have administrator rights')
+
+    def verify_volunteer_page_error(self, volunteer_url):
+        """
+        Utility function to verify errors raised on the
+        pages when user tries to volunteer pages provided as
+        volunteer_url in param.
+        :param volunteer_url: URL of volunteer page to check errors on.
+        """
+        home_page = self.home_page
+        home_page.get_page(self.live_server_url, volunteer_url)
+        head = home_page.get_no_volunteer_right()
+        body = home_page.get_no_volunteer_right_content()
+        self.assertNotEqual(head, None)
+        self.assertNotEqual(body, None)
+        self.assertEqual(head.text, 'No Access')
+        self.assertEqual(body.text, 'You don\'t have the required rights')
+
+    def login(self, username, password):
+        """
+        Utility function to login with credentials received as parameters.
+        :param username: Username of the user
+        :param password: Password of the user
+        """
+        self.authentication_page.login({
+            'username': username,
+            'password': password
+        })
+
+    def wait_for_home_page(self):
+        """
+        Utility function to perform a explicit wait for home page.
+        """
+        self.wait.until(
+            EC.presence_of_element_located(
+                (By.XPATH,
+                 "//h1[contains(text(), 'Volunteer Management System')]")
+            )
+        )
 
     def test_admin_cannot_access_volunteer_urls(self):
-        '''
-        Method logins an admin user and tries to surf volunteer pages through
-        url. The volunteer views should return a 403 error to deny access.
-        '''
-        self.driver.get(self.live_server_url + self.authentication_page)
+        """
+        Test admin will be shown errors when they try to access
+        volunteers URLs.
+        """
 
-        self.driver.find_element_by_id('id_login').send_keys('admin')
-        self.driver.find_element_by_id('id_password').send_keys('admin')
-        self.driver.find_element_by_xpath('//form[1]').submit()
+        authentication_page = self.authentication_page
+        authentication_page.server_url = self.live_server_url
+        self.login(username='admin', password='admin')
+        self.wait_for_home_page()
 
-        self.driver.get(self.live_server_url + '/shift/view_volunteer_shifts/1')
-        page_source = self.driver.page_source
-        error = re.search('403', page_source)
-        self.assertNotEqual(error, None)
-
-        self.driver.get(self.live_server_url + '/shift/view_hours/1')
-        page_source = self.driver.page_source
-        error = re.search('403', page_source)
-        self.assertNotEqual(error, None)
-
-
-        self.driver.get(self.live_server_url + '/event/list_sign_up/1')
-        page_source = self.driver.page_source
-        error = re.search('403', page_source)
-        self.assertNotEqual(error, None)
-
-        self.driver.get(self.live_server_url + '/volunteer/report/1')
-        page_source = self.driver.page_source
-        error = re.search('403', page_source)
-        self.assertNotEqual(error, None)
-
-        self.driver.get(self.live_server_url + '/volunteer/profile/1')
-        page_source = self.driver.page_source
-        error = re.search('403', page_source)
-        self.assertNotEqual(error, None)
+        self.verify_volunteer_page_error(PageUrls.upcoming_shifts_page + '1000')
+        self.verify_volunteer_page_error(
+            PageUrls.completed_shifts_page + '1000'
+        )
+        self.verify_volunteer_page_error(
+            PageUrls.volunteer_report_page + '1000'
+        )
+        self.verify_volunteer_page_error(
+            PageUrls.volunteer_profile_page + '1000'
+        )
 
     def test_volunteer_cannot_access_admin_urls(self):
-        '''
-        Method logins a volunteer and tries to surf admin page views through url.
-        The admin views should return a no admin rights page.
-        '''
-        self.driver.get(self.live_server_url + self.authentication_page)
+        """
+        Test volunteer will be shown errors when they try to access
+        admin URLs.
+        """
+        authentication_page = self.authentication_page
+        authentication_page.server_url = self.live_server_url
+        self.login(username='volunteer', password='volunteer')
+        self.wait_for_home_page()
 
-        self.driver.find_element_by_id('id_login').send_keys('volunteer')
-        self.driver.find_element_by_id('id_password').send_keys('volunteer')
-        self.driver.find_element_by_xpath('//form[1]').submit()
-
-
-        self.driver.get(self.live_server_url + '/shift/volunteer_search/')
-        self.assertNotEqual(self.driver.find_elements_by_class_name('panel-heading'),
-                None)
-        self.assertNotEqual(self.driver.find_elements_by_class_name('panel-body'),
-                None)
-        self.assertEqual(self.driver.find_element_by_class_name('panel-heading').text,
-                'No Access')
-        self.assertEqual(self.driver.find_element_by_class_name('panel-body').text,
-                "You don't have administrator rights")
-        
-
-        self.driver.get(self.live_server_url + '/administrator/report/')
-        self.assertNotEqual(self.driver.find_element_by_class_name('panel-heading'),
-                None)
-        self.assertNotEqual(self.driver.find_element_by_class_name('panel-body'),
-                None)
-        self.assertEqual(self.driver.find_element_by_class_name('panel-heading').text,
-                'No Access')
-        self.assertEqual(self.driver.find_element_by_class_name('panel-body').text,
-                "You don't have administrator rights")
+        self.verify_admin_page_error(PageUrls.manage_volunteer_shift_page)
+        self.verify_admin_page_error(PageUrls.admin_settings_page)
+        self.verify_admin_page_error(PageUrls.volunteer_search_page)
 
 
-        self.driver.get(self.live_server_url + '/volunteer/search/')
-        self.assertNotEqual(self.driver.find_elements_by_class_name('panel-heading'),
-                None)
-        self.assertNotEqual(self.driver.find_elements_by_class_name('panel-body'),
-                None)
-        self.assertEqual(self.driver.find_element_by_class_name('panel-heading').text,
-                'No Access')
-        self.assertEqual(self.driver.find_element_by_class_name('panel-body').text,
-                "You don't have administrator rights")
+class CheckContentAndRedirection(LiveServerTestCase):
+    """
+    This Class contains methods to check if
 
+    - an administrator or a volunteer are provided their respective views
+    links on their dashboard.
+    - all links in the nav-bar for admin and volunteer page redirect to desired
+    views.
 
-        self.driver.get(self.live_server_url + '/administrator/settings/')
-        self.assertNotEqual(self.driver.find_elements_by_class_name('panel-heading'),
-                None)
-        self.assertNotEqual(self.driver.find_elements_by_class_name('panel-body'),
-                None)
-        self.assertEqual(self.driver.find_element_by_class_name('panel-heading').text,
-                'No Access')
-        self.assertEqual(self.driver.find_element_by_class_name('panel-body').text,
-                "You don't have administrator rights")
-
-
-        self.driver.get(self.live_server_url + '/registration/signup_administrator/')
-        self.assertNotEqual(self.driver.find_elements_by_class_name('panel-heading'),
-                None)
-        self.assertNotEqual(self.driver.find_elements_by_class_name('panel-body'),
-                None)
-        self.assertEqual(self.driver.find_element_by_class_name('panel-heading').text,
-                'No Access')
-        self.assertEqual(self.driver.find_element_by_class_name('panel-body').text,
-                "You don't have administrator rights")"""
-
-
-class CheckPageContent(LiveServerTestCase):
-    '''
-    This Class contains methods to check if an administrator or a volunteer
-    are provided their respective views links on their dashboard.
+    For content, following checks are implemented:
     - Check admin page content
     - check volunteer page content
-    '''
+
+    Admin views nav-bar consists of:
+    - Volunteer Search
+    - Manage Volunteer Shifts
+    - Report
+    - Settings
+    - Create Admin Account
+    - Change Password
+    - Logout
+
+    Volunteer views nav-bar consists of:
+    - Upcoming Shifts
+    - Shift Hours
+    - Shift SignUp
+    - Report
+    - Profile
+    - Change Password
+    - Logout
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Method to initiate class level objects.
+
+        This method initiates Firefox WebDriver, WebDriverWait and
+        the corresponding POM objects for this Test Class
+        """
+        firefox_options = Options()
+        firefox_options.add_argument('-headless')
+        cls.driver = webdriver.Firefox(firefox_options=firefox_options)
+        cls.driver.implicitly_wait(5)
+        cls.driver.maximize_window()
+        cls.home_page = HomePage(cls.driver)
+        cls.authentication_page = AuthenticationPage(cls.driver)
+        cls.wait = WebDriverWait(cls.driver, 10)
+        super(CheckContentAndRedirection, cls).setUpClass()
+
     def setUp(self):
-        admin_user = User.objects.create_user(
-                username = 'admin',
-                password = 'admin',
-                email = 'admin@admin.com')
-
-        volunteer_user = User.objects.create_user(
-                username = 'volunteer',
-                password = 'volunteer',
-                email = 'volunteer@volunteer.com')
-
-        Administrator.objects.create(
-                user = admin_user,
-                address = 'address',
-                city = 'city',
-                state = 'state',
-                country = 'country',
-                phone_number = '9999999999',
-                unlisted_organization = 'organization')
-
-        Volunteer.objects.create(
-                user = volunteer_user,
-                address = 'address',
-                city = 'city',
-                state = 'state',
-                country = 'country',
-                phone_number = '9999999999',
-                unlisted_organization = 'organization')
-
-        self.authentication_page = '/authentication/login/'
-        self.driver = webdriver.Firefox()
-        self.driver.maximize_window()
-        super(CheckPageContent, self).setUp()
+        """
+        Method consists of statements to be executed before
+        start of each test.
+        """
+        self.admin = create_admin()
+        self.volunteer = create_volunteer()
+        self.volunteer_id = str(self.volunteer.id)
 
     def tearDown(self):
-        self.driver.quit()
-        super(CheckPageContent, self).tearDown()
+        """
+        Method consists of statements to be executed at
+        end of each test.
+        """
+        pass
+
+    @classmethod
+    def tearDownClass(cls):
+        """
+        Class method to quit the Firefox WebDriver session after
+        execution of all tests in class.
+        """
+        cls.driver.quit()
+        super(CheckContentAndRedirection, cls).tearDownClass()
+
+    def login(self, username, password):
+        """
+        Utility function to login with credentials received as parameters.
+        :param username: Username of the user
+        :param password: Password of the user
+        """
+        self.authentication_page.login({
+            'username': username,
+            'password': password
+        })
+
+    def wait_for_home_page(self):
+        """
+        Utility function to perform a explicit wait for home page.
+        """
+        self.wait.until(
+            EC.presence_of_element_located(
+                (By.XPATH,
+                 "//h1[contains(text(), 'Volunteer Management System')]")
+            )
+        )
 
     def test_check_admin_page_content(self):
-        '''
+        """
         Check if an admin user has following functionalities on its home page.
         - Volunteer Search
         - Manage Volunteer Shift
         - Report
         - Settings
         - Create Admin Account
-        '''
-        self.driver.get(self.live_server_url + self.authentication_page)
+        """
+        authentication_page = self.authentication_page
+        authentication_page.server_url = self.live_server_url
+        home_page = self.home_page
 
-        self.driver.find_element_by_id('id_login').send_keys('admin')
-        self.driver.find_element_by_id('id_password').send_keys('admin')
-        self.driver.find_element_by_xpath('//form[1]').submit()
+        self.login(username='admin', password='admin')
+        self.wait_for_home_page()
 
-        with self.assertRaises(NoSuchElementException):
-            self.driver.find_element_by_link_text('Log In')
-
-        self.assertNotEqual(self.driver.find_element_by_link_text(
-            'Volunteer Search'), None)
-        self.assertNotEqual(self.driver.find_element_by_link_text(
-            'Manage Volunteer Shifts'), None)
-        self.assertNotEqual(self.driver.find_element_by_link_text(
-            'Report'), None)
-        self.assertNotEqual(self.driver.find_element_by_link_text(
-            'Events'), None)
-        self.assertNotEqual(self.driver.find_element_by_link_text(
-            'Create Admin Account'), None)
-        self.assertNotEqual(self.driver.find_element_by_link_text(
-            'Log Out'), None)
+        self.assertRaisesRegexp(NoSuchElementException,
+                                'Unable to locate element: Log In',
+                                home_page.get_login_link)
+        self.assertNotEqual(home_page.get_volunteer_search_link(), None)
+        self.assertNotEqual(home_page.get_manage_shifts_link(), None)
+        self.assertNotEqual(home_page.get_admin_report_link(), None)
+        self.assertNotEqual(home_page.get_events_link(), None)
+        self.assertNotEqual(home_page.get_create_admin_link(), None)
+        self.assertNotEqual(home_page.get_change_password_link(), None)
+        self.assertNotEqual(home_page.get_logout_link(), None)
 
     def test_check_volunteer_page_content(self):
-        '''
+        """
         Check if a volunteer user has following functionalities on its home
         page.
         - UpComing Shift
@@ -396,174 +289,164 @@ class CheckPageContent(LiveServerTestCase):
         - Shift Sign Up
         - Report
         - Profile
-        '''
-        self.driver.get(self.live_server_url + self.authentication_page)
+        """
+        home_page = self.home_page
+        authentication_page = self.authentication_page
+        authentication_page.server_url = self.live_server_url
+        self.login(username='volunteer', password='volunteer')
+        self.wait_for_home_page()
 
-        self.driver.find_element_by_id('id_login').send_keys('volunteer')
-        self.driver.find_element_by_id('id_password').send_keys('volunteer')
-        self.driver.find_element_by_xpath('//form[1]').submit()
-
-        with self.assertRaises(NoSuchElementException):
-            self.driver.find_element_by_link_text('Log In')
-
-        self.assertNotEqual(self.driver.find_element_by_link_text(
-            'Upcoming Shifts'), None)
-        self.assertNotEqual(self.driver.find_element_by_link_text(
-            'Completed Shifts'), None)
-        self.assertNotEqual(self.driver.find_element_by_link_text(
-            'Shift Sign Up'), None)
-        self.assertNotEqual(self.driver.find_element_by_link_text(
-            'Report'), None)
-        self.assertNotEqual(self.driver.find_element_by_link_text(
-            'Profile'), None)
-        self.assertNotEqual(self.driver.find_element_by_link_text(
-            'Log Out'), None)
-
-class CheckRedirection(LiveServerTestCase):
-    '''
-    CheckRedirection class contains test cases to check if all links
-    in the nav-bar for admin and volunteer page redirect to desired
-    views.
-    Admin views nav-bar consists of:
-    - Volunteer Search
-    - Manage Volunteer Shifts
-    - Report
-    - Settings
-    - Create Admin Account
-    - Logout
-
-    Volunteer views nav-bar consists of:
-    - Upcoming Shifts
-    - Shift Hours
-    - Sihft SignUp
-    - Report
-    - Profile
-    - Logout
-    '''
-    def setUp(self):
-        admin_user = User.objects.create_user(
-                username = 'admin',
-                password = 'admin',
-                email = 'admin@admin.com')
-
-        volunteer_user = User.objects.create_user(
-                username = 'volunteer',
-                password = 'volunteer',
-                email = 'volunteer@volunteer.com')
-
-        Administrator.objects.create(
-                user = admin_user,
-                address = 'address',
-                city = 'city',
-                state = 'state',
-                country = 'country',
-                phone_number = '9999999999',
-                unlisted_organization = 'organization')
-
-        Volunteer.objects.create(
-                user = volunteer_user,
-                address = 'address',
-                city = 'city',
-                state = 'state',
-                country = 'country',
-                phone_number = '9999999999',
-                unlisted_organization = 'organization')
-
-        self.volunteer_id = str(Volunteer.objects.get(user__username =
-                'volunteer').pk)
-
-        self.authentication_page = '/authentication/login/'
-        self.homepage = '/'
-        self.driver = webdriver.Firefox()
-        self.driver.maximize_window()
-        super(CheckRedirection, self).setUp()
-
-    def tearDown(self):
-        self.driver.quit()
-        super(CheckRedirection, self).tearDown()
+        self.assertRaisesRegexp(NoSuchElementException,
+                                'Unable to locate element: Log In',
+                                home_page.get_login_link)
+        self.assertNotEqual(home_page.get_upcoming_shifts_link(), None)
+        self.assertNotEqual(home_page.get_completed_shifts_link(), None)
+        self.assertNotEqual(home_page.get_shift_signup_link(), None)
+        self.assertNotEqual(home_page.get_volunteer_report_link(), None)
+        self.assertNotEqual(home_page.get_volunteer_profile_link(), None)
+        self.assertNotEqual(home_page.get_change_password_link(), None)
+        self.assertNotEqual(home_page.get_logout_link(), None)
 
     def test_admin_page_redirection(self):
-        self.driver.get(self.live_server_url + self.authentication_page)
+        """
+        Test admin is redirected corrected to home page after
+        successful authorization by checking different elements
+        on home page.
+        """
+        home_page = self.home_page
+        authentication_page = self.authentication_page
+        authentication_page.server_url = self.live_server_url
+        self.login(username='admin', password='admin')
+        self.wait_for_home_page()
 
-        self.driver.find_element_by_id('id_login').send_keys('admin')
-        self.driver.find_element_by_id('id_password').send_keys('admin')
-        self.driver.find_element_by_xpath('//form[1]').submit()
+        self.assertEqual(
+            authentication_page.remove_i18n(self.driver.current_url),
+            self.live_server_url + PageUrls.homepage
+        )
+        self.assertRaisesRegexp(NoSuchElementException,
+                                'Unable to locate element: Log In',
+                                home_page.get_login_link)
 
-        self.assertEqual(self.driver.current_url, self.live_server_url +
-                self.homepage)
+        volunteer_search_link = \
+            home_page.get_volunteer_search_link().get_attribute('href')
+        self.assertEqual(
+            home_page.remove_i18n(volunteer_search_link),
+            self.live_server_url + PageUrls.volunteer_search_page
+        )
 
-        with self.assertRaises(NoSuchElementException):
-            self.driver.find_element_by_link_text('Log In')
+        manage_volunteer_shift_link = \
+            home_page.get_manage_shifts_link().get_attribute('href')
+        self.assertEqual(
+            home_page.remove_i18n(manage_volunteer_shift_link),
+            self.live_server_url + PageUrls.manage_volunteer_shift_page
+        )
 
-        volunteer_search_link =  self.driver.find_element_by_link_text(
-                'Volunteer Search').get_attribute('href')
-        self.assertEqual(volunteer_search_link, self.live_server_url + 
-                '/volunteer/search/')
+        report_link = \
+            home_page.get_admin_report_link().get_attribute('href')
+        self.assertEqual(
+            home_page.remove_i18n(report_link),
+            self.live_server_url + PageUrls.administrator_report_page
+        )
 
-        manage_volunteer_shift_link =  self.driver.find_element_by_link_text(
-                'Manage Volunteer Shifts').get_attribute('href')
-        self.assertEqual(manage_volunteer_shift_link, self.live_server_url + 
-                '/shift/volunteer_search/')
+        settings_link = \
+            home_page.get_events_link().get_attribute('href')
+        self.assertEqual(
+            home_page.remove_i18n(settings_link),
+            self.live_server_url + PageUrls.admin_settings_page
+        )
 
-        report_link =  self.driver.find_element_by_link_text(
-                'Report').get_attribute('href')
-        self.assertEqual(report_link, self.live_server_url + 
-                '/administrator/report/')
+        create_account_link = \
+            home_page.get_create_admin_link().get_attribute('href')
+        self.assertEqual(
+            home_page.remove_i18n(create_account_link),
+            self.live_server_url + PageUrls.admin_registration_page
+        )
 
-        settings_link =  self.driver.find_element_by_link_text(
-                'Events').get_attribute('href')
-        self.assertEqual(settings_link, self.live_server_url + 
-                '/administrator/settings/')
+        change_password_link = \
+            home_page.get_change_password_link().get_attribute('href')
+        self.assertEqual(
+            home_page.remove_i18n(change_password_link),
+            self.live_server_url + PageUrls.password_change_page
+        )
 
-        creat_account_link =  self.driver.find_element_by_link_text(
-                'Create Admin Account').get_attribute('href')
-        self.assertEqual(creat_account_link, self.live_server_url + 
-                '/registration/signup_administrator/')
-
-        logout_link =  self.driver.find_element_by_link_text(
-                'Log Out').get_attribute('href')
-        self.assertEqual(logout_link, self.live_server_url + 
-                '/authentication/logout/')
+        logout_link = \
+            home_page.get_logout_link().get_attribute('href')
+        self.assertEqual(
+            home_page.remove_i18n(logout_link),
+            self.live_server_url + PageUrls.logout_page
+        )
 
     def test_volunteer_page_redirection(self):
-        self.driver.get(self.live_server_url + self.authentication_page)
+        """
+        Test volunteer is redirected corrected to home page after
+        successful authorization by checking different elements
+        on home page.
+        """
+        home_page = self.home_page
+        authentication_page = self.authentication_page
+        authentication_page.server_url = self.live_server_url
+        self.login(username='volunteer', password='volunteer')
+        self.wait_for_home_page()
 
-        self.driver.find_element_by_id('id_login').send_keys('volunteer')
-        self.driver.find_element_by_id('id_password').send_keys('volunteer')
-        self.driver.find_element_by_xpath('//form[1]').submit()
+        self.assertEqual(
+            home_page.remove_i18n(self.driver.current_url),
+            self.live_server_url + PageUrls.homepage
+        )
+        self.assertRaisesRegexp(NoSuchElementException,
+                                'Unable to locate element: Log In',
+                                home_page.get_login_link)
 
-        self.assertEqual(self.driver.current_url, self.live_server_url +
-                self.homepage)
+        upcoming_shift_link = \
+            home_page.get_upcoming_shifts_link().get_attribute('href')
+        self.assertEqual(
+            home_page.remove_i18n(upcoming_shift_link),
+            self.live_server_url +
+            PageUrls.upcoming_shifts_page +
+            self.volunteer_id
+        )
 
-        with self.assertRaises(NoSuchElementException):
-            self.driver.find_element_by_link_text('Log In')
+        shift_hours_link = \
+            home_page.get_completed_shifts_link().get_attribute('href')
+        self.assertEqual(
+            home_page.remove_i18n(shift_hours_link),
+            self.live_server_url +
+            PageUrls.completed_shifts_page +
+            self.volunteer_id
+        )
 
-        upcoming_shift_link =  self.driver.find_element_by_link_text(
-                'Upcoming Shifts').get_attribute('href')
-        self.assertEqual(upcoming_shift_link, self.live_server_url + 
-                '/shift/view_volunteer_shifts/' + self.volunteer_id)
+        shift_signup_link = \
+            home_page.get_shift_signup_link().get_attribute('href')
+        self.assertEqual(
+            home_page.remove_i18n(shift_signup_link),
+            self.live_server_url +
+            PageUrls.shift_sign_up_page +
+            self.volunteer_id
+        )
 
-        shift_hours_link =  self.driver.find_element_by_link_text(
-                'Completed Shifts').get_attribute('href')
-        self.assertEqual(shift_hours_link, self.live_server_url + 
-                '/shift/view_hours/' + self.volunteer_id)
+        report_link = \
+            home_page.get_volunteer_report_link().get_attribute('href')
+        self.assertEqual(
+            home_page.remove_i18n(report_link),
+            self.live_server_url +
+            PageUrls.volunteer_report_page +
+            self.volunteer_id
+        )
 
-        shift_signup_link =  self.driver.find_element_by_link_text(
-                'Shift Sign Up').get_attribute('href')
-        self.assertEqual(shift_signup_link, self.live_server_url + 
-                '/event/list_sign_up/' + self.volunteer_id)
+        profile_link = \
+            home_page.get_volunteer_profile_link().get_attribute('href')
+        self.assertEqual(
+            home_page.remove_i18n(profile_link),
+            self.live_server_url +
+            PageUrls.volunteer_profile_page +
+            self.volunteer_id
+        )
 
-        report_link =  self.driver.find_element_by_link_text(
-                'Report').get_attribute('href')
-        self.assertEqual(report_link, self.live_server_url + 
-                '/volunteer/report/' + self.volunteer_id)
+        change_password_link = \
+            home_page.get_change_password_link().get_attribute('href')
+        self.assertEqual(home_page.remove_i18n(change_password_link),
+                         self.live_server_url + PageUrls.password_change_page)
 
-        profile_link =  self.driver.find_element_by_link_text(
-                'Profile').get_attribute('href')
-        self.assertEqual(profile_link, self.live_server_url + 
-                '/volunteer/profile/' + self.volunteer_id)
+        logout_link = home_page.get_logout_link().get_attribute('href')
+        self.assertEqual(home_page.remove_i18n(logout_link),
+                         self.live_server_url + PageUrls.logout_page)
 
-        logout_link =  self.driver.find_element_by_link_text(
-                'Log Out').get_attribute('href')
-        self.assertEqual(logout_link, self.live_server_url + 
-                '/authentication/logout/')

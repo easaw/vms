@@ -1,7 +1,10 @@
+# Django
+# from django.db import Model
 from django import forms
-from django.db import models
 from django.forms import ModelForm
-from shift.models import Shift
+
+# local Django
+from shift.models import Shift, EditRequest
 
 
 class HoursForm(forms.Form):
@@ -13,16 +16,29 @@ class ShiftForm(ModelForm):
     class Meta:
         model = Shift
         fields = [
-            'date',
-            'start_time',
-            'end_time',
-            'max_volunteers',
-            'country',
-            'state',
-            'city',
-            'address',
-            'venue'
-            ]
+            'date', 'start_time', 'end_time', 'max_volunteers', 'country',
+            'state', 'city', 'address', 'venue'
+        ]
 
-# we don't check that start_time > end_time because we could
-# start at 11pm and end at 1am and this test would fail
+    # Shifts are bound to end on the same date so
+    # end_time has to be greater than start_time
+    def clean(self):
+        cleaned_data = super(ShiftForm, self).clean()
+        start_time = cleaned_data.get('start_time')
+        end_time = cleaned_data.get('end_time')
+
+        if start_time and end_time:
+            if start_time > end_time:
+                msg = u"Start time must be before the end time"
+                self._errors['start_time'] = self.error_class([msg])
+
+        return self.cleaned_data
+
+
+class EditForm(ModelForm):
+    class Meta:
+        model = EditRequest
+        fields = [
+            'start_time', 'end_time'
+        ]
+
